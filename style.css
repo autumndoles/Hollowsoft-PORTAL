@@ -5,10 +5,6 @@ p {
 body {
   background-color: #90EE90;
 }
-.EX{
+a {
   color: red;
-}
-
-a[href*='How To Edit This Code']{
-  color: darkgreen;
 }
