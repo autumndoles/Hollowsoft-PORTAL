@@ -8,3 +8,7 @@ body {
 .EX{
   color: red
 }
+
+a[href*='How To Edit This Code']{
+  color: lightblue
+}
