@@ -10,5 +10,5 @@ body {
 }
 
 a[href*='How To Edit This Code']{
-  color: lightblue;
+  color: darkgreen;
 }
