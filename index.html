@@ -32,26 +32,7 @@
     <button type="submit" style="padding: 8px 16px;">Search</button>
 </form>
 
-<script>
-function executeGoogleSearch(event) {
-    // 1. Prevent the default HTML form submission from messing up the URL
-    event.preventDefault();
-    
-    const searchInput = document.getElementById('antManSearch');
-    let query = searchInput.value.trim();
-    
-    // 2. If you didn't type anything, use your Avengers joke text
-    if (query === "") {
-        query = "As far as im concerned, thats americas ass - Ant Man";
-    }
-    
-    // 3. Cleanly encode the text for a URL (handles spaces, symbols, etc. perfectly)
-    const encodedQuery = encodeURIComponent(query);
-    
-    // 4. Force the current window to open the absolute, direct Google results link
-    window.location.href = `https://google.com{encodedQuery}`;
-}
-</script>
+
 
 
 </body>
