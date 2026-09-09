@@ -24,13 +24,11 @@
     <img src="Codeacademy.png" alt= "codeacademy" width="50">
   </a>
   <a href="https://www.youtube.com/watch?v=dQw4w9WgXcQ" target="_blank">How To Edit This Code</a>
-<!-- We change the action to run a clean JavaScript function instead -->
-<form onsubmit="executeGoogleSearch(event)" style="display: inline-flex; width: 100%; max-width: 550px;">
-    
-    <input type="search" id="antManSearch" placeholder="As far as im concerned, thats americas ass - Ant Man" style="flex: 1; padding: 8px 12px; font-size: 16px; min-width: 450px;" />
-    
-    <button type="submit" style="padding: 8px 16px;">Search</button>
+  <form action="https://www.google.com/search" method="GET" target="_blank">
+    <input type="search" name="q" placeholder="as far as im concerned, thats america's ass- ant man" required>
+    <button type="submit">Search</button>
 </form>
+
 
 
 
