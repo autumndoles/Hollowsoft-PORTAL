@@ -1,37 +1,68 @@
+
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
   <title>Hollowsoft Portal</title>
-   <link href='style.css' rel='stylesheet'>
+  <link href="style.css" rel="stylesheet">
 </head>
+
 <body>
-  <h1 class='EX'>HOLLOWSOFT PORTAL</h1>
-  <p> Hollowsoft portal is a project built for convenient access to your favorite sites.<br> You can update this code to include different sites, or use the base sites</p>
-  <a href="https://open.spotify.com/" target="_blank">
+
+  <h1 class="EX">HOLLOWSOFT PORTAL</h1>
+
+  <p>
+    Hollowsoft portal is a project built for convenient access to your favorite sites.
+    <br>
+    Enter a website or search term below.
+  </p>
+
+  <!-- Unified Search -->
+
+  <form action="/go" method="GET">
+    <input
+      type="search"
+      name="q"
+      placeholder="Search or enter a URL..."
+      autocomplete="off"
+      required
+    >
+
+    <button type="submit">Go</button>
+  </form>
+
+  <br><br>
+
+  <!-- Favorite Sites -->
+
+  <a href="/go?q=https://open.spotify.com/" target="_blank">
     <img src="SPOTIFY.png" alt="Spotify" width="50">
-      </a>
- <a href="https://classroom.google.com" target="_blank">
-  <img src="images.jpeg" alt="google classroom" width="50">
-   </a>
-   <a href="https://www.youtube.com/" target="_blank">
-    <img src="Youtube_logo.webp" alt="youtube" width="50">
-      </a>
-     <a href="https://scratch.mit.edu/" target="_blank">
-    <img src="download.png" alt="scratch" width="50">
-      </a>
-  <a href="https://www.codecademy.com/learn" target= "_blank">
-    <img src="Codeacademy.png" alt= "codeacademy" width="50">
   </a>
-  <a href="https://www.youtube.com/watch?v=dQw4w9WgXcQ" target="_blank">How To Edit This Code</a>
-  <form action="https://www.google.com/search" method="GET" target="_blank">
-    <input type="search" name="q" placeholder="as far as im concerned, thats america's ass- ant man" required>
-    <button type="submit">Search</button>
-</form>
 
+  <a href="/go?q=https://classroom.google.com" target="_blank">
+    <img src="images.jpeg" alt="Google Classroom" width="50">
+  </a>
 
+  <a href="/go?q=https://www.youtube.com/" target="_blank">
+    <img src="Youtube_logo.webp" alt="YouTube" width="50">
+  </a>
 
+  <a href="/go?q=https://scratch.mit.edu/" target="_blank">
+    <img src="download.png" alt="Scratch" width="50">
+  </a>
 
+  <a href="/go?q=https://www.codecademy.com/learn" target="_blank">
+    <img src="Codeacademy.png" alt="Codecademy" width="50">
+  </a>
+
+  <br><br>
+
+  <a
+    href="https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    target="_blank"
+  >
+    How To Edit This Code
+  </a>
 
 </body>
 </html>
