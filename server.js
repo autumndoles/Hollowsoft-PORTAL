@@ -6,53 +6,42 @@ const net = require("net");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --------------------------------------------------
-// Hollowsoft Portal
-// --------------------------------------------------
+// ==================================================
+// STATIC PORTAL
+// ==================================================
 
 app.use(express.static("."));
 
-// --------------------------------------------------
-// Scratch route handling
-// --------------------------------------------------
+// ==================================================
+// SCRATCH DIRECT ROUTES
+// ==================================================
 
-// Scratch project pages sometimes navigate to:
-//
-// /projects/123456789/
-//
-// Catch those and proxy them to Scratch.
-app.use(async (req, res, next) => {
+// If Scratch's client-side router changes the browser
+// to /projects/123/, catch it here.
+app.use((req, res, next) => {
     if (
         req.path.startsWith("/projects/") ||
-        req.path.startsWith("/project/") ||
-        req.path.startsWith("/api/")
+        req.path.startsWith("/studios/") ||
+        req.path.startsWith("/users/")
     ) {
-        const scratchURL =
+        const target =
             "https://scratch.mit.edu" +
             req.originalUrl;
 
-        console.log(
-            "Scratch route:",
-            scratchURL
-        );
+        console.log("Scratch navigation:", target);
 
-        return proxyRequest(
-            scratchURL,
-            req,
-            res
-        );
+        return proxyRequest(target, req, res);
     }
 
     next();
 });
 
-// --------------------------------------------------
-// Unified search box
-// --------------------------------------------------
+// ==================================================
+// UNIFIED SEARCH
+// ==================================================
 
 app.get("/go", (req, res) => {
-    const input =
-        (req.query.q || "").trim();
+    const input = (req.query.q || "").trim();
 
     if (!input) {
         return res.redirect("/");
@@ -60,7 +49,6 @@ app.get("/go", (req, res) => {
 
     let destination;
 
-    // URL
     if (
         /^https?:\/\//i.test(input) ||
         /^[a-z0-9.-]+\.[a-z]{2,}(\/.*)?$/i.test(input)
@@ -69,10 +57,7 @@ app.get("/go", (req, res) => {
             /^https?:\/\//i.test(input)
                 ? input
                 : "https://" + input;
-    }
-
-    // Search
-    else {
+    } else {
         destination =
             "https://www.google.com/search?q=" +
             encodeURIComponent(input);
@@ -84,44 +69,31 @@ app.get("/go", (req, res) => {
     );
 });
 
-// --------------------------------------------------
-// Main proxy
-// --------------------------------------------------
+// ==================================================
+// MAIN PROXY
+// ==================================================
 
 app.get("/proxy", async (req, res) => {
     const target = req.query.url;
 
     if (!target) {
-        return res.status(400).send(
-            "Missing URL."
-        );
+        return res.status(400).send("Missing URL.");
     }
 
-    return proxyRequest(
-        target,
-        req,
-        res
-    );
+    return proxyRequest(target, req, res);
 });
 
-// --------------------------------------------------
-// Proxy engine
-// --------------------------------------------------
+// ==================================================
+// PROXY ENGINE
+// ==================================================
 
-async function proxyRequest(
-    target,
-    req,
-    res
-) {
+async function proxyRequest(target, req, res) {
     let targetURL;
 
     try {
-        targetURL =
-            new URL(target);
+        targetURL = new URL(target);
     } catch {
-        return res.status(400).send(
-            "Invalid URL."
-        );
+        return res.status(400).send("Invalid URL.");
     }
 
     if (
@@ -133,27 +105,20 @@ async function proxyRequest(
         );
     }
 
-    // --------------------------------------------------
-    // Prevent private network access
-    // --------------------------------------------------
+    // ==================================================
+    // PRIVATE NETWORK PROTECTION
+    // ==================================================
 
     try {
-        const addresses =
-            await dns.lookup(
-                targetURL.hostname,
-                {
-                    all: true
-                }
-            );
+        const addresses = await dns.lookup(
+            targetURL.hostname,
+            {
+                all: true
+            }
+        );
 
-        for (
-            const address of addresses
-        ) {
-            if (
-                isPrivateAddress(
-                    address.address
-                )
-            ) {
+        for (const address of addresses) {
+            if (isPrivateAddress(address.address)) {
                 return res.status(403).send(
                     "Access to private network addresses is not allowed."
                 );
@@ -165,22 +130,22 @@ async function proxyRequest(
         );
     }
 
-    // --------------------------------------------------
-    // Detect Scratch
-    // --------------------------------------------------
+    // ==================================================
+    // HOST DETECTION
+    // ==================================================
+
+    const hostname =
+        targetURL.hostname.toLowerCase();
 
     const isScratch =
-        targetURL.hostname ===
-            "scratch.mit.edu" ||
-        targetURL.hostname.endsWith(
-            ".scratch.mit.edu"
-        );
+        hostname === "scratch.mit.edu" ||
+        hostname.endsWith(".scratch.mit.edu");
+
+    // ==================================================
+    // REQUEST
+    // ==================================================
 
     try {
-        // --------------------------------------------------
-        // Request headers
-        // --------------------------------------------------
-
         const headers = {
             "User-Agent":
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
@@ -191,26 +156,27 @@ async function proxyRequest(
                 "text/html,application/xhtml+xml," +
                 "application/xml;q=0.9," +
                 "image/avif,image/webp," +
-                "image/apng,*/*;q=0.8"
+                "image/apng,*/*;q=0.8",
+
+            "Accept-Language":
+                "en-US,en;q=0.9"
         };
 
-        // Scratch expects normal browser-ish headers
         if (isScratch) {
             headers["Referer"] =
                 "https://scratch.mit.edu/";
 
-            headers["Accept-Language"] =
-                "en-US,en;q=0.9";
+            headers["Origin"] =
+                "https://scratch.mit.edu";
         }
 
-        const response =
-            await fetch(
-                targetURL,
-                {
-                    redirect: "follow",
-                    headers
-                }
-            );
+        const response = await fetch(
+            targetURL,
+            {
+                redirect: "follow",
+                headers
+            }
+        );
 
         const finalURL =
             new URL(response.url);
@@ -221,26 +187,23 @@ async function proxyRequest(
             ) || "";
 
         console.log(
-            `${response.status} ${finalURL.href}`
+            `[${response.status}] ${finalURL.href}`
         );
 
-        // --------------------------------------------------
-        // Non-HTML content
-        // --------------------------------------------------
+        // ==================================================
+        // NON-HTML FILES
+        // ==================================================
 
         if (
             !contentType
                 .toLowerCase()
                 .includes("text/html")
         ) {
-            const data =
-                Buffer.from(
-                    await response.arrayBuffer()
-                );
-
-            res.status(
-                response.status
+            const data = Buffer.from(
+                await response.arrayBuffer()
             );
+
+            res.status(response.status);
 
             if (contentType) {
                 res.set(
@@ -249,26 +212,35 @@ async function proxyRequest(
                 );
             }
 
-            return res.send(
-                data
-            );
+            // Preserve useful headers
+            const cacheControl =
+                response.headers.get(
+                    "cache-control"
+                );
+
+            if (cacheControl) {
+                res.set(
+                    "Cache-Control",
+                    cacheControl
+                );
+            }
+
+            return res.send(data);
         }
 
-        // --------------------------------------------------
+        // ==================================================
         // HTML
-        // --------------------------------------------------
+        // ==================================================
 
         const html =
             await response.text();
 
         const $ =
-            cheerio.load(
-                html
-            );
+            cheerio.load(html);
 
-        // --------------------------------------------------
-        // Rewrite links
-        // --------------------------------------------------
+        // ==================================================
+        // REWRITE HTML LINKS
+        // ==================================================
 
         $("a[href]").each(
             (_, element) => {
@@ -281,9 +253,9 @@ async function proxyRequest(
             }
         );
 
-        // --------------------------------------------------
-        // Images
-        // --------------------------------------------------
+        // ==================================================
+        // IMAGES
+        // ==================================================
 
         $("img[src]").each(
             (_, element) => {
@@ -296,9 +268,9 @@ async function proxyRequest(
             }
         );
 
-        // --------------------------------------------------
-        // Scripts
-        // --------------------------------------------------
+        // ==================================================
+        // SCRIPTS
+        // ==================================================
 
         $("script[src]").each(
             (_, element) => {
@@ -311,9 +283,9 @@ async function proxyRequest(
             }
         );
 
-        // --------------------------------------------------
-        // Stylesheets
-        // --------------------------------------------------
+        // ==================================================
+        // CSS
+        // ==================================================
 
         $("link[href]").each(
             (_, element) => {
@@ -326,9 +298,26 @@ async function proxyRequest(
             }
         );
 
-        // --------------------------------------------------
-        // Iframes
-        // --------------------------------------------------
+        $("style").each(
+            (_, element) => {
+                let css =
+                    $(element).html();
+
+                if (!css) return;
+
+                css =
+                    rewriteCSSUrls(
+                        css,
+                        finalURL
+                    );
+
+                $(element).html(css);
+            }
+        );
+
+        // ==================================================
+        // IFRAME
+        // ==================================================
 
         $("iframe[src]").each(
             (_, element) => {
@@ -341,9 +330,9 @@ async function proxyRequest(
             }
         );
 
-        // --------------------------------------------------
-        // Video/audio
-        // --------------------------------------------------
+        // ==================================================
+        // MEDIA
+        // ==================================================
 
         $(
             "video[src], audio[src], source[src]"
@@ -358,9 +347,9 @@ async function proxyRequest(
             }
         );
 
-        // --------------------------------------------------
-        // Forms
-        // --------------------------------------------------
+        // ==================================================
+        // FORMS
+        // ==================================================
 
         $("form[action]").each(
             (_, element) => {
@@ -373,52 +362,181 @@ async function proxyRequest(
             }
         );
 
-        // --------------------------------------------------
-        // Inline CSS
-        // --------------------------------------------------
+        // ==================================================
+        // INJECT JAVASCRIPT PROXY LAYER
+        // ==================================================
 
-        $("style").each(
-            (_, element) => {
-                let css =
-                    $(element).html();
-
-                if (!css) {
-                    return;
-                }
-
-                css =
-                    rewriteCSSUrls(
-                        css,
-                        finalURL
-                    );
-
-                $(element).html(
-                    css
-                );
-            }
-        );
-
-        // --------------------------------------------------
-        // Scratch-specific navigation
-        // --------------------------------------------------
-
-        const navigationScript = `
+        const proxyScript = `
 <script>
 (function() {
 
-    const HOLLOWSOFT_PROXY =
-        "/proxy?url=";
+    const HOLLOW_PROXY = "/proxy?url=";
 
-    function hollowsoftProxy(url) {
+    const ORIGINAL_HOST =
+        ${JSON.stringify(finalURL.origin)};
+
+    function makeProxyURL(url) {
 
         try {
 
             const absolute =
                 new URL(
                     url,
-                    ${JSON.stringify(
-                        finalURL.href
-                    )}
+                    ${JSON.stringify(finalURL.href)}
+                );
+
+            if (
+                absolute.protocol !== "http:" &&
+                absolute.protocol !== "https:"
+            ) {
+                return url;
+            }
+
+            // Don't proxy our own Hollowsoft URLs.
+            if (
+                absolute.origin ===
+                    window.location.origin
+            ) {
+                return absolute.href;
+            }
+
+            return (
+                HOLLOW_PROXY +
+                encodeURIComponent(
+                    absolute.href
+                )
+            );
+
+        } catch {
+            return url;
+        }
+    }
+
+    // ==================================================
+    // FETCH
+    // ==================================================
+
+    const originalFetch =
+        window.fetch;
+
+    window.fetch =
+        function(input, init) {
+
+            try {
+
+                if (
+                    typeof input ===
+                    "string"
+                ) {
+
+                    input =
+                        makeProxyURL(
+                            input
+                        );
+
+                } else if (
+                    input instanceof Request
+                ) {
+
+                    const proxied =
+                        makeProxyURL(
+                            input.url
+                        );
+
+                    input =
+                        new Request(
+                            proxied,
+                            input
+                        );
+                }
+
+            } catch (error) {
+
+                console.warn(
+                    "Hollowsoft fetch rewrite failed:",
+                    error
+                );
+
+            }
+
+            return originalFetch.call(
+                this,
+                input,
+                init
+            );
+        };
+
+    // ==================================================
+    // XHR
+    // ==================================================
+
+    const originalOpen =
+        XMLHttpRequest.prototype.open;
+
+    XMLHttpRequest.prototype.open =
+        function(
+            method,
+            url,
+            async,
+            user,
+            password
+        ) {
+
+            try {
+
+                url =
+                    makeProxyURL(
+                        url
+                    );
+
+            } catch {}
+
+            return originalOpen.call(
+                this,
+                method,
+                url,
+                async,
+                user,
+                password
+            );
+        };
+
+    // ==================================================
+    // WEBSOCKET
+    // ==================================================
+
+    const OriginalWebSocket =
+        window.WebSocket;
+
+    window.WebSocket =
+        function(url, protocols) {
+
+            console.warn(
+                "Hollowsoft: WebSocket requested:",
+                url
+            );
+
+            return new OriginalWebSocket(
+                url,
+                protocols
+            );
+        };
+
+    window.WebSocket.prototype =
+        OriginalWebSocket.prototype;
+
+    // ==================================================
+    // HISTORY NAVIGATION
+    // ==================================================
+
+    function navigate(url) {
+
+        try {
+
+            const absolute =
+                new URL(
+                    url,
+                    ${JSON.stringify(finalURL.href)}
                 );
 
             if (
@@ -438,7 +556,6 @@ async function proxyRequest(
                     "url"
                 );
 
-            // Already proxied
             if (
                 current.pathname ===
                     "/proxy" &&
@@ -449,8 +566,7 @@ async function proxyRequest(
             }
 
             window.location.href =
-                HOLLOWSOFT_PROXY +
-                encodeURIComponent(
+                makeProxyURL(
                     absolute.href
                 );
 
@@ -464,10 +580,6 @@ async function proxyRequest(
         }
     }
 
-    // ----------------------------------------------
-    // pushState
-    // ----------------------------------------------
-
     const originalPushState =
         history.pushState;
 
@@ -479,9 +591,7 @@ async function proxyRequest(
         ) {
 
             if (url) {
-                hollowsoftProxy(
-                    url
-                );
+                navigate(url);
                 return;
             }
 
@@ -490,10 +600,6 @@ async function proxyRequest(
                 arguments
             );
         };
-
-    // ----------------------------------------------
-    // replaceState
-    // ----------------------------------------------
 
     const originalReplaceState =
         history.replaceState;
@@ -506,9 +612,7 @@ async function proxyRequest(
         ) {
 
             if (url) {
-                hollowsoftProxy(
-                    url
-                );
+                navigate(url);
                 return;
             }
 
@@ -518,9 +622,9 @@ async function proxyRequest(
             );
         };
 
-    // ----------------------------------------------
-    // Scratch project links
-    // ----------------------------------------------
+    // ==================================================
+    // SCRATCH PROJECT LINKS
+    // ==================================================
 
     document.addEventListener(
         "click",
@@ -549,9 +653,7 @@ async function proxyRequest(
                 const absolute =
                     new URL(
                         href,
-                        ${JSON.stringify(
-                            finalURL.href
-                        )}
+                        ${JSON.stringify(finalURL.href)}
                     );
 
                 if (
@@ -573,7 +675,7 @@ async function proxyRequest(
                     event.preventDefault();
                     event.stopPropagation();
 
-                    hollowsoftProxy(
+                    navigate(
                         absolute.href
                     );
                 }
@@ -588,19 +690,21 @@ async function proxyRequest(
 </script>
 `;
 
-        if ($("body").length) {
-            $("body").append(
-                navigationScript
+        // Put our interception code as early as
+        // possible in the document.
+        if ($("head").length) {
+            $("head").prepend(
+                proxyScript
             );
         } else {
-            $.root().append(
-                navigationScript
+            $.root().prepend(
+                proxyScript
             );
         }
 
-        // --------------------------------------------------
-        // Return modified page
-        // --------------------------------------------------
+        // ==================================================
+        // SEND PAGE
+        // ==================================================
 
         res.status(
             response.status
@@ -631,63 +735,61 @@ async function proxyRequest(
 
 <head>
 
-    <meta charset="UTF-8">
+<meta charset="UTF-8">
 
-    <title>
-        Hollowsoft Proxy Error
-    </title>
+<title>
+Hollowsoft Proxy Error
+</title>
 
-    <style>
+<style>
 
-        body {
-            margin: 0;
-            padding: 50px;
+body {
+    margin: 0;
+    padding: 50px;
 
-            background: #111;
-            color: white;
+    background: #111;
+    color: white;
 
-            font-family:
-                Arial,
-                sans-serif;
+    font-family: Arial, sans-serif;
 
-            text-align: center;
-        }
+    text-align: center;
+}
 
-        h1 {
-            font-size: 32px;
-        }
+h1 {
+    font-size: 32px;
+}
 
-        p {
-            color: #aaa;
-        }
+p {
+    color: #aaa;
+}
 
-        code {
-            color: white;
-        }
+code {
+    color: white;
+}
 
-    </style>
+</style>
 
 </head>
 
 <body>
 
-    <h1>
-        Hollowsoft couldn't load that page.
-    </h1>
+<h1>
+Hollowsoft couldn't load that page.
+</h1>
 
-    <p>
-        The target website rejected the request
-        or could not be reached by the proxy.
-    </p>
+<p>
+The target website rejected the request
+or could not be reached by the proxy.
+</p>
 
-    <p>
-        <code>
-            ${escapeHtml(
-                error.message ||
-                "Unknown error"
-            )}
-        </code>
-    </p>
+<p>
+<code>
+${escapeHtml(
+    error.message ||
+    "Unknown error"
+)}
+</code>
+</p>
 
 </body>
 
@@ -696,9 +798,9 @@ async function proxyRequest(
     }
 }
 
-// --------------------------------------------------
-// Rewrite HTML attributes
-// --------------------------------------------------
+// ==================================================
+// HTML ATTRIBUTE REWRITER
+// ==================================================
 
 function rewriteAttribute(
     $,
@@ -719,7 +821,6 @@ function rewriteAttribute(
     const trimmed =
         value.trim();
 
-    // Special URLs
     if (
         trimmed.startsWith("#") ||
         trimmed.startsWith(
@@ -770,9 +871,9 @@ function rewriteAttribute(
 
 }
 
-// --------------------------------------------------
-// Rewrite CSS URLs
-// --------------------------------------------------
+// ==================================================
+// CSS URL REWRITER
+// ==================================================
 
 function rewriteCSSUrls(
     css,
@@ -824,8 +925,8 @@ function rewriteCSSUrls(
                 }
 
                 return (
-                    'url("' +
-                    proxyURL(
+                    'url("/proxy?url=' +
+                    encodeURIComponent(
                         absolute.href
                     ) +
                     '")'
@@ -836,36 +937,18 @@ function rewriteCSSUrls(
                 return match;
 
             }
-
         }
     );
-
 }
 
-// --------------------------------------------------
-// Create proxy URL
-// --------------------------------------------------
-
-function proxyURL(url) {
-
-    return (
-        "/proxy?url=" +
-        encodeURIComponent(
-            url
-        )
-    );
-
-}
-
-// --------------------------------------------------
-// Private IP protection
-// --------------------------------------------------
+// ==================================================
+// PRIVATE ADDRESS CHECK
+// ==================================================
 
 function isPrivateAddress(
     address
 ) {
 
-    // IPv4
     if (
         net.isIPv4(address)
     ) {
@@ -881,14 +964,10 @@ function isPrivateAddress(
         const b =
             parts[1];
 
-        // 10.0.0.0/8
-        if (
-            a === 10
-        ) {
+        if (a === 10) {
             return true;
         }
 
-        // 172.16.0.0/12
         if (
             a === 172 &&
             b >= 16 &&
@@ -897,7 +976,6 @@ function isPrivateAddress(
             return true;
         }
 
-        // 192.168.0.0/16
         if (
             a === 192 &&
             b === 168
@@ -905,14 +983,10 @@ function isPrivateAddress(
             return true;
         }
 
-        // 127.0.0.0/8
-        if (
-            a === 127
-        ) {
+        if (a === 127) {
             return true;
         }
 
-        // 169.254.0.0/16
         if (
             a === 169 &&
             b === 254
@@ -923,7 +997,6 @@ function isPrivateAddress(
         return false;
     }
 
-    // IPv6
     if (
         net.isIPv6(address)
     ) {
@@ -931,30 +1004,21 @@ function isPrivateAddress(
         const normalized =
             address.toLowerCase();
 
-        // Loopback
         if (
             normalized === "::1"
         ) {
             return true;
         }
 
-        // Unique local
         if (
-            normalized.startsWith(
-                "fc"
-            ) ||
-            normalized.startsWith(
-                "fd"
-            )
+            normalized.startsWith("fc") ||
+            normalized.startsWith("fd")
         ) {
             return true;
         }
 
-        // Link-local
         if (
-            normalized.startsWith(
-                "fe80:"
-            )
+            normalized.startsWith("fe80:")
         ) {
             return true;
         }
@@ -965,13 +1029,11 @@ function isPrivateAddress(
     return true;
 }
 
-// --------------------------------------------------
-// HTML escaping
-// --------------------------------------------------
+// ==================================================
+// HTML ESCAPING
+// ==================================================
 
-function escapeHtml(
-    value
-) {
+function escapeHtml(value) {
 
     return String(value)
         .replace(
@@ -990,12 +1052,11 @@ function escapeHtml(
             />/g,
             "&gt;"
         );
-
 }
 
-// --------------------------------------------------
-// Start Hollowsoft
-// --------------------------------------------------
+// ==================================================
+// START SERVER
+// ==================================================
 
 app.listen(
     PORT,
