@@ -6,32 +6,53 @@ const net = require("net");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Serve Hollowsoft Portal files from the repository root
+// --------------------------------------------------
+// Hollowsoft Portal
+// --------------------------------------------------
+
 app.use(express.static("."));
 
-// Scratch client-side routes sometimes escape the proxy and become
-// /projects/1/, /projects/123456789/, etc.
-// Catch those routes and send them back through the proxy.
-app.use((req, res, next) => {
-    if (req.path.startsWith("/projects/")) {
+// --------------------------------------------------
+// Scratch route handling
+// --------------------------------------------------
+
+// Scratch project pages sometimes navigate to:
+//
+// /projects/123456789/
+//
+// Catch those and proxy them to Scratch.
+app.use(async (req, res, next) => {
+    if (
+        req.path.startsWith("/projects/") ||
+        req.path.startsWith("/project/") ||
+        req.path.startsWith("/api/")
+    ) {
         const scratchURL =
             "https://scratch.mit.edu" +
-            req.path +
-            (req.originalUrl.includes("?")
-                ? req.originalUrl.substring(req.originalUrl.indexOf("?"))
-                : "");
+            req.originalUrl;
 
-        return res.redirect(
-            "/proxy?url=" + encodeURIComponent(scratchURL)
+        console.log(
+            "Scratch route:",
+            scratchURL
+        );
+
+        return proxyRequest(
+            scratchURL,
+            req,
+            res
         );
     }
 
     next();
 });
 
-// Unified search / URL handler
+// --------------------------------------------------
+// Unified search box
+// --------------------------------------------------
+
 app.get("/go", (req, res) => {
-    const input = (req.query.q || "").trim();
+    const input =
+        (req.query.q || "").trim();
 
     if (!input) {
         return res.redirect("/");
@@ -39,40 +60,68 @@ app.get("/go", (req, res) => {
 
     let destination;
 
-    // Detect URLs
+    // URL
     if (
         /^https?:\/\//i.test(input) ||
         /^[a-z0-9.-]+\.[a-z]{2,}(\/.*)?$/i.test(input)
     ) {
-        destination = /^https?:\/\//i.test(input)
-            ? input
-            : "https://" + input;
-    } else {
-        // Otherwise search Google
+        destination =
+            /^https?:\/\//i.test(input)
+                ? input
+                : "https://" + input;
+    }
+
+    // Search
+    else {
         destination =
             "https://www.google.com/search?q=" +
             encodeURIComponent(input);
     }
 
     res.redirect(
-        "/proxy?url=" + encodeURIComponent(destination)
+        "/proxy?url=" +
+        encodeURIComponent(destination)
     );
 });
 
+// --------------------------------------------------
 // Main proxy
+// --------------------------------------------------
+
 app.get("/proxy", async (req, res) => {
     const target = req.query.url;
 
     if (!target) {
-        return res.status(400).send("Missing URL.");
+        return res.status(400).send(
+            "Missing URL."
+        );
     }
 
+    return proxyRequest(
+        target,
+        req,
+        res
+    );
+});
+
+// --------------------------------------------------
+// Proxy engine
+// --------------------------------------------------
+
+async function proxyRequest(
+    target,
+    req,
+    res
+) {
     let targetURL;
 
     try {
-        targetURL = new URL(target);
+        targetURL =
+            new URL(target);
     } catch {
-        return res.status(400).send("Invalid URL.");
+        return res.status(400).send(
+            "Invalid URL."
+        );
     }
 
     if (
@@ -84,15 +133,27 @@ app.get("/proxy", async (req, res) => {
         );
     }
 
-    // Prevent access to private/local network addresses
-    try {
-        const addresses = await dns.lookup(
-            targetURL.hostname,
-            { all: true }
-        );
+    // --------------------------------------------------
+    // Prevent private network access
+    // --------------------------------------------------
 
-        for (const address of addresses) {
-            if (isPrivateAddress(address.address)) {
+    try {
+        const addresses =
+            await dns.lookup(
+                targetURL.hostname,
+                {
+                    all: true
+                }
+            );
+
+        for (
+            const address of addresses
+        ) {
+            if (
+                isPrivateAddress(
+                    address.address
+                )
+            ) {
                 return res.status(403).send(
                     "Access to private network addresses is not allowed."
                 );
@@ -104,92 +165,127 @@ app.get("/proxy", async (req, res) => {
         );
     }
 
+    // --------------------------------------------------
+    // Detect Scratch
+    // --------------------------------------------------
+
+    const isScratch =
+        targetURL.hostname ===
+            "scratch.mit.edu" ||
+        targetURL.hostname.endsWith(
+            ".scratch.mit.edu"
+        );
+
     try {
-        const response = await fetch(targetURL, {
-            redirect: "follow",
+        // --------------------------------------------------
+        // Request headers
+        // --------------------------------------------------
 
-            headers: {
-                "User-Agent":
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-                    "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                    "Chrome/140 Safari/537.36",
+        const headers = {
+            "User-Agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                "Chrome/140.0.0.0 Safari/537.36",
 
-                "Accept":
-                    "text/html,application/xhtml+xml," +
-                    "application/xml;q=0.9,*/*;q=0.8"
-            }
-        });
+            "Accept":
+                "text/html,application/xhtml+xml," +
+                "application/xml;q=0.9," +
+                "image/avif,image/webp," +
+                "image/apng,*/*;q=0.8"
+        };
 
-        const finalURL = new URL(response.url);
+        // Scratch expects normal browser-ish headers
+        if (isScratch) {
+            headers["Referer"] =
+                "https://scratch.mit.edu/";
+
+            headers["Accept-Language"] =
+                "en-US,en;q=0.9";
+        }
+
+        const response =
+            await fetch(
+                targetURL,
+                {
+                    redirect: "follow",
+                    headers
+                }
+            );
+
+        const finalURL =
+            new URL(response.url);
 
         const contentType =
-            response.headers.get("content-type") || "";
+            response.headers.get(
+                "content-type"
+            ) || "";
 
-        // Non-HTML resources are passed through unchanged
+        console.log(
+            `${response.status} ${finalURL.href}`
+        );
+
+        // --------------------------------------------------
+        // Non-HTML content
+        // --------------------------------------------------
+
         if (
             !contentType
                 .toLowerCase()
                 .includes("text/html")
         ) {
-            const data = Buffer.from(
-                await response.arrayBuffer()
-            );
+            const data =
+                Buffer.from(
+                    await response.arrayBuffer()
+                );
 
-            res.status(response.status);
+            res.status(
+                response.status
+            );
 
             if (contentType) {
-                res.set("Content-Type", contentType);
+                res.set(
+                    "Content-Type",
+                    contentType
+                );
             }
 
-            return res.send(data);
+            return res.send(
+                data
+            );
         }
 
-        // Load HTML through Cheerio
-        const html = await response.text();
-        const $ = cheerio.load(html);
+        // --------------------------------------------------
+        // HTML
+        // --------------------------------------------------
 
-        // Rewrite normal links
-        $("a[href]").each((_, element) => {
-            rewriteAttribute(
-                $,
-                element,
-                "href",
-                finalURL
+        const html =
+            await response.text();
+
+        const $ =
+            cheerio.load(
+                html
             );
-        });
 
-        // Rewrite images
-        $("img[src]").each((_, element) => {
-            rewriteAttribute(
-                $,
-                element,
-                "src",
-                finalURL
-            );
-        });
+        // --------------------------------------------------
+        // Rewrite links
+        // --------------------------------------------------
 
-        // Rewrite scripts
-        $("script[src]").each((_, element) => {
-            rewriteAttribute(
-                $,
-                element,
-                "src",
-                finalURL
-            );
-        });
+        $("a[href]").each(
+            (_, element) => {
+                rewriteAttribute(
+                    $,
+                    element,
+                    "href",
+                    finalURL
+                );
+            }
+        );
 
-        // Rewrite stylesheets
-        $("link[href]").each((_, element) => {
-            rewriteAttribute(
-                $,
-                element,
-                "href",
-                finalURL
-            );
-        });
+        // --------------------------------------------------
+        // Images
+        // --------------------------------------------------
 
-        // Rewrite media
-        $("video[src], audio[src], source[src]").each(
+        $("img[src]").each(
             (_, element) => {
                 rewriteAttribute(
                     $,
@@ -200,59 +296,130 @@ app.get("/proxy", async (req, res) => {
             }
         );
 
-        // Rewrite iframes
-        $("iframe[src]").each((_, element) => {
-            rewriteAttribute(
-                $,
-                element,
-                "src",
-                finalURL
-            );
-        });
+        // --------------------------------------------------
+        // Scripts
+        // --------------------------------------------------
 
-        // Rewrite forms
-        $("form[action]").each((_, element) => {
-            rewriteAttribute(
-                $,
-                element,
-                "action",
-                finalURL
-            );
-        });
-
-        // Rewrite inline CSS
-        $("style").each((_, element) => {
-            let css = $(element).html();
-
-            if (!css) {
-                return;
+        $("script[src]").each(
+            (_, element) => {
+                rewriteAttribute(
+                    $,
+                    element,
+                    "src",
+                    finalURL
+                );
             }
+        );
 
-            css = rewriteCSSUrls(
-                css,
-                finalURL
-            );
+        // --------------------------------------------------
+        // Stylesheets
+        // --------------------------------------------------
 
-            $(element).html(css);
-        });
+        $("link[href]").each(
+            (_, element) => {
+                rewriteAttribute(
+                    $,
+                    element,
+                    "href",
+                    finalURL
+                );
+            }
+        );
 
-        /*
-         * Handle websites that use history.pushState()
-         * or history.replaceState() for navigation.
-         *
-         * This is especially important for Scratch.
-         */
+        // --------------------------------------------------
+        // Iframes
+        // --------------------------------------------------
+
+        $("iframe[src]").each(
+            (_, element) => {
+                rewriteAttribute(
+                    $,
+                    element,
+                    "src",
+                    finalURL
+                );
+            }
+        );
+
+        // --------------------------------------------------
+        // Video/audio
+        // --------------------------------------------------
+
+        $(
+            "video[src], audio[src], source[src]"
+        ).each(
+            (_, element) => {
+                rewriteAttribute(
+                    $,
+                    element,
+                    "src",
+                    finalURL
+                );
+            }
+        );
+
+        // --------------------------------------------------
+        // Forms
+        // --------------------------------------------------
+
+        $("form[action]").each(
+            (_, element) => {
+                rewriteAttribute(
+                    $,
+                    element,
+                    "action",
+                    finalURL
+                );
+            }
+        );
+
+        // --------------------------------------------------
+        // Inline CSS
+        // --------------------------------------------------
+
+        $("style").each(
+            (_, element) => {
+                let css =
+                    $(element).html();
+
+                if (!css) {
+                    return;
+                }
+
+                css =
+                    rewriteCSSUrls(
+                        css,
+                        finalURL
+                    );
+
+                $(element).html(
+                    css
+                );
+            }
+        );
+
+        // --------------------------------------------------
+        // Scratch-specific navigation
+        // --------------------------------------------------
+
         const navigationScript = `
 <script>
 (function() {
-    const proxyPrefix = "/proxy?url=";
 
-    function proxyURL(url) {
+    const HOLLOWSOFT_PROXY =
+        "/proxy?url=";
+
+    function hollowsoftProxy(url) {
+
         try {
-            const absolute = new URL(
-                url,
-                ${JSON.stringify(finalURL.href)}
-            );
+
+            const absolute =
+                new URL(
+                    url,
+                    ${JSON.stringify(
+                        finalURL.href
+                    )}
+                );
 
             if (
                 absolute.protocol !== "http:" &&
@@ -261,82 +428,183 @@ app.get("/proxy", async (req, res) => {
                 return;
             }
 
-            const current = new URL(
-                window.location.href
-            );
+            const current =
+                new URL(
+                    window.location.href
+                );
 
             const currentTarget =
-                current.searchParams.get("url");
+                current.searchParams.get(
+                    "url"
+                );
 
+            // Already proxied
             if (
-                current.pathname === "/proxy" &&
-                currentTarget === absolute.href
+                current.pathname ===
+                    "/proxy" &&
+                currentTarget ===
+                    absolute.href
             ) {
                 return;
             }
 
             window.location.href =
-                proxyPrefix +
+                HOLLOWSOFT_PROXY +
                 encodeURIComponent(
                     absolute.href
                 );
 
         } catch (error) {
+
             console.error(
                 "Hollowsoft navigation error:",
                 error
             );
+
         }
     }
+
+    // ----------------------------------------------
+    // pushState
+    // ----------------------------------------------
 
     const originalPushState =
         history.pushState;
 
+    history.pushState =
+        function(
+            state,
+            title,
+            url
+        ) {
+
+            if (url) {
+                hollowsoftProxy(
+                    url
+                );
+                return;
+            }
+
+            return originalPushState.apply(
+                history,
+                arguments
+            );
+        };
+
+    // ----------------------------------------------
+    // replaceState
+    // ----------------------------------------------
+
     const originalReplaceState =
         history.replaceState;
 
-    history.pushState = function(
-        state,
-        title,
-        url
-    ) {
-        if (url) {
-            proxyURL(url);
-            return;
-        }
+    history.replaceState =
+        function(
+            state,
+            title,
+            url
+        ) {
 
-        return originalPushState.apply(
-            history,
-            arguments
-        );
-    };
+            if (url) {
+                hollowsoftProxy(
+                    url
+                );
+                return;
+            }
 
-    history.replaceState = function(
-        state,
-        title,
-        url
-    ) {
-        if (url) {
-            proxyURL(url);
-            return;
-        }
+            return originalReplaceState.apply(
+                history,
+                arguments
+            );
+        };
 
-        return originalReplaceState.apply(
-            history,
-            arguments
-        );
-    };
+    // ----------------------------------------------
+    // Scratch project links
+    // ----------------------------------------------
+
+    document.addEventListener(
+        "click",
+        function(event) {
+
+            const link =
+                event.target.closest(
+                    "a"
+                );
+
+            if (!link) {
+                return;
+            }
+
+            const href =
+                link.getAttribute(
+                    "href"
+                );
+
+            if (!href) {
+                return;
+            }
+
+            try {
+
+                const absolute =
+                    new URL(
+                        href,
+                        ${JSON.stringify(
+                            finalURL.href
+                        )}
+                    );
+
+                if (
+                    absolute.hostname ===
+                        "scratch.mit.edu" &&
+                    (
+                        absolute.pathname.startsWith(
+                            "/projects/"
+                        ) ||
+                        absolute.pathname.startsWith(
+                            "/studios/"
+                        ) ||
+                        absolute.pathname.startsWith(
+                            "/users/"
+                        )
+                    )
+                ) {
+
+                    event.preventDefault();
+                    event.stopPropagation();
+
+                    hollowsoftProxy(
+                        absolute.href
+                    );
+                }
+
+            } catch {}
+
+        },
+        true
+    );
 
 })();
 </script>
 `;
 
-        // Add the navigation helper to the page
-        $("body").append(
-            navigationScript
-        );
+        if ($("body").length) {
+            $("body").append(
+                navigationScript
+            );
+        } else {
+            $.root().append(
+                navigationScript
+            );
+        }
 
-        res.status(response.status);
+        // --------------------------------------------------
+        // Return modified page
+        // --------------------------------------------------
+
+        res.status(
+            response.status
+        );
 
         res.set(
             "Content-Type",
@@ -348,25 +616,40 @@ app.get("/proxy", async (req, res) => {
         );
 
     } catch (error) {
+
         console.error(
             "Hollowsoft proxy error:",
             error
         );
 
-        return res.status(502).send(`
+        return res.status(
+            502
+        ).send(`
 <!DOCTYPE html>
+
 <html>
+
 <head>
+
     <meta charset="UTF-8">
-    <title>Hollowsoft Proxy Error</title>
+
+    <title>
+        Hollowsoft Proxy Error
+    </title>
 
     <style>
+
         body {
             margin: 0;
             padding: 50px;
+
             background: #111;
             color: white;
-            font-family: Arial, sans-serif;
+
+            font-family:
+                Arial,
+                sans-serif;
+
             text-align: center;
         }
 
@@ -381,7 +664,9 @@ app.get("/proxy", async (req, res) => {
         code {
             color: white;
         }
+
     </style>
+
 </head>
 
 <body>
@@ -405,49 +690,70 @@ app.get("/proxy", async (req, res) => {
     </p>
 
 </body>
+
 </html>
         `);
     }
-});
+}
 
-// Rewrite HTML attributes into proxy URLs
+// --------------------------------------------------
+// Rewrite HTML attributes
+// --------------------------------------------------
+
 function rewriteAttribute(
     $,
     element,
     attribute,
     baseURL
 ) {
-    const value = $(element).attr(
-        attribute
-    );
+
+    const value =
+        $(element).attr(
+            attribute
+        );
 
     if (!value) {
         return;
     }
 
-    const trimmed = value.trim();
+    const trimmed =
+        value.trim();
 
-    // Don't rewrite special URLs
+    // Special URLs
     if (
         trimmed.startsWith("#") ||
-        trimmed.startsWith("javascript:") ||
-        trimmed.startsWith("mailto:") ||
-        trimmed.startsWith("tel:") ||
-        trimmed.startsWith("data:") ||
-        trimmed.startsWith("blob:")
+        trimmed.startsWith(
+            "javascript:"
+        ) ||
+        trimmed.startsWith(
+            "mailto:"
+        ) ||
+        trimmed.startsWith(
+            "tel:"
+        ) ||
+        trimmed.startsWith(
+            "data:"
+        ) ||
+        trimmed.startsWith(
+            "blob:"
+        )
     ) {
         return;
     }
 
     try {
-        const absolute = new URL(
-            trimmed,
-            baseURL.href
-        );
+
+        const absolute =
+            new URL(
+                trimmed,
+                baseURL.href
+            );
 
         if (
-            absolute.protocol !== "http:" &&
-            absolute.protocol !== "https:"
+            absolute.protocol !==
+                "http:" &&
+            absolute.protocol !==
+                "https:"
         ) {
             return;
         }
@@ -460,32 +766,48 @@ function rewriteAttribute(
                 )
         );
 
-    } catch {
-        // Ignore invalid URLs
-    }
+    } catch {}
+
 }
 
-// Rewrite CSS url(...) references
+// --------------------------------------------------
+// Rewrite CSS URLs
+// --------------------------------------------------
+
 function rewriteCSSUrls(
     css,
     baseURL
 ) {
+
     return css.replace(
         /url\(\s*(['"]?)(.*?)\1\s*\)/gi,
-        (match, quote, value) => {
+
+        (
+            match,
+            quote,
+            value
+        ) => {
+
             const trimmed =
                 value.trim();
 
             if (
                 !trimmed ||
-                trimmed.startsWith("data:") ||
-                trimmed.startsWith("blob:") ||
-                trimmed.startsWith("#")
+                trimmed.startsWith(
+                    "data:"
+                ) ||
+                trimmed.startsWith(
+                    "blob:"
+                ) ||
+                trimmed.startsWith(
+                    "#"
+                )
             ) {
                 return match;
             }
 
             try {
+
                 const absolute =
                     new URL(
                         trimmed,
@@ -493,8 +815,10 @@ function rewriteCSSUrls(
                     );
 
                 if (
-                    absolute.protocol !== "http:" &&
-                    absolute.protocol !== "https:"
+                    absolute.protocol !==
+                        "http:" &&
+                    absolute.protocol !==
+                        "https:"
                 ) {
                     return match;
                 }
@@ -508,34 +832,59 @@ function rewriteCSSUrls(
                 );
 
             } catch {
+
                 return match;
+
             }
+
         }
     );
+
 }
 
-// Create a proxy URL
+// --------------------------------------------------
+// Create proxy URL
+// --------------------------------------------------
+
 function proxyURL(url) {
+
     return (
         "/proxy?url=" +
-        encodeURIComponent(url)
+        encodeURIComponent(
+            url
+        )
     );
+
 }
 
-// Check whether an IP is private/local
-function isPrivateAddress(address) {
+// --------------------------------------------------
+// Private IP protection
+// --------------------------------------------------
+
+function isPrivateAddress(
+    address
+) {
+
     // IPv4
-    if (net.isIPv4(address)) {
+    if (
+        net.isIPv4(address)
+    ) {
+
         const parts =
             address
                 .split(".")
                 .map(Number);
 
-        const a = parts[0];
-        const b = parts[1];
+        const a =
+            parts[0];
+
+        const b =
+            parts[1];
 
         // 10.0.0.0/8
-        if (a === 10) {
+        if (
+            a === 10
+        ) {
             return true;
         }
 
@@ -557,7 +906,9 @@ function isPrivateAddress(address) {
         }
 
         // 127.0.0.0/8
-        if (a === 127) {
+        if (
+            a === 127
+        ) {
             return true;
         }
 
@@ -573,7 +924,10 @@ function isPrivateAddress(address) {
     }
 
     // IPv6
-    if (net.isIPv6(address)) {
+    if (
+        net.isIPv6(address)
+    ) {
+
         const normalized =
             address.toLowerCase();
 
@@ -584,17 +938,23 @@ function isPrivateAddress(address) {
             return true;
         }
 
-        // Unique local addresses
+        // Unique local
         if (
-            normalized.startsWith("fc") ||
-            normalized.startsWith("fd")
+            normalized.startsWith(
+                "fc"
+            ) ||
+            normalized.startsWith(
+                "fd"
+            )
         ) {
             return true;
         }
 
         // Link-local
         if (
-            normalized.startsWith("fe80:")
+            normalized.startsWith(
+                "fe80:"
+            )
         ) {
             return true;
         }
@@ -602,12 +962,17 @@ function isPrivateAddress(address) {
         return false;
     }
 
-    // Unknown address type
     return true;
 }
 
-// Escape error messages before putting them into HTML
-function escapeHtml(value) {
+// --------------------------------------------------
+// HTML escaping
+// --------------------------------------------------
+
+function escapeHtml(
+    value
+) {
+
     return String(value)
         .replace(
             /&/g,
@@ -625,15 +990,21 @@ function escapeHtml(value) {
             />/g,
             "&gt;"
         );
+
 }
 
-// Start server
+// --------------------------------------------------
+// Start Hollowsoft
+// --------------------------------------------------
+
 app.listen(
     PORT,
     "0.0.0.0",
     () => {
+
         console.log(
             `Hollowsoft running on port ${PORT}`
         );
+
     }
 );
