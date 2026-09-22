@@ -4,7 +4,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Serve the Hollowsoft frontend
-app.use(express.static("public"));
+app.use(express.static("."));
 
 
 // ========================================
