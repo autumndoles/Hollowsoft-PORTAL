@@ -238,9 +238,6 @@ app.get("/proxy", async (req, res) => {
         // URLs originally came from.
         // --------------------------------
 
-        $("head").prepend(
-            `<base href="${escapeHtml(targetURL.href)}">`
-        );
 
 
         // --------------------------------
