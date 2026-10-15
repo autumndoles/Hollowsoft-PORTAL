@@ -10,6 +10,13 @@ const PORT = process.env.PORT || 3000;
 // STATIC PORTAL
 // ==================================================
 
+// Preserve request bodies for proxied API calls (POST/PUT/PATCH, etc.).
+// This middleware only applies to /proxy requests.
+app.use("/proxy", express.raw({
+    type: "*/*",
+    limit: "20mb"
+}));
+
 app.use(express.static("."));
 
 // ==================================================
@@ -73,7 +80,7 @@ app.get("/go", (req, res) => {
 // MAIN PROXY
 // ==================================================
 
-app.get("/proxy", async (req, res) => {
+app.all("/proxy", async (req, res) => {
     const target = req.query.url;
 
     if (!target) {
@@ -153,14 +160,43 @@ async function proxyRequest(target, req, res) {
                 "Chrome/140.0.0.0 Safari/537.36",
 
             "Accept":
+                req.get("accept") ||
                 "text/html,application/xhtml+xml," +
-                "application/xml;q=0.9," +
-                "image/avif,image/webp," +
-                "image/apng,*/*;q=0.8",
+                "application/xml;q=0.9,*/*;q=0.8",
 
             "Accept-Language":
-                "en-US,en;q=0.9"
+                req.get("accept-language") || "en-US,en;q=0.9"
         };
+
+        // Forward only request headers needed by APIs. Do not forward
+        // Hollowsoft's own Host, Cookie, or connection-specific headers.
+        for (const name of [
+            "content-type",
+            "authorization",
+            "x-requested-with",
+            "x-csrftoken",
+            "x-csrf-token"
+        ]) {
+            const value = req.get(name);
+            if (value) headers[name] = value;
+        }
+
+        // Never forward Hollowsoft's own cookies to a remote site.
+        const method = req.method.toUpperCase();
+
+        const requestOptions = {
+            method,
+            redirect: "follow",
+            headers
+        };
+
+        if (
+            method !== "GET" &&
+            method !== "HEAD" &&
+            req.body?.length
+        ) {
+            requestOptions.body = req.body;
+        }
 
         if (isScratch) {
             headers["Referer"] =
@@ -172,10 +208,7 @@ async function proxyRequest(target, req, res) {
 
         const response = await fetch(
             targetURL,
-            {
-                redirect: "follow",
-                headers
-            }
+            requestOptions
         );
 
         const finalURL =
@@ -212,7 +245,7 @@ async function proxyRequest(target, req, res) {
                 );
             }
 
-            // Preserve useful headers
+            // Preserve useful headers.
             const cacheControl =
                 response.headers.get(
                     "cache-control"
@@ -378,6 +411,19 @@ async function proxyRequest(target, req, res) {
     function makeProxyURL(url) {
 
         try {
+            // DOM attributes may already contain our local proxy URL.
+            // Leave it alone instead of wrapping it in another /proxy call.
+            if (
+                typeof url === "string" &&
+                (
+                    url.startsWith("/proxy?url=") ||
+                    url.startsWith(
+                        window.location.origin + "/proxy?url="
+                    )
+                )
+            ) {
+                return url;
+            }
 
             const absolute =
                 new URL(
@@ -394,8 +440,7 @@ async function proxyRequest(target, req, res) {
 
             // Don't proxy our own Hollowsoft URLs.
             if (
-                absolute.origin ===
-                    window.location.origin
+                absolute.origin === window.location.origin
             ) {
                 return absolute.href;
             }
@@ -425,8 +470,7 @@ async function proxyRequest(target, req, res) {
             try {
 
                 if (
-                    typeof input ===
-                    "string"
+                    typeof input === "string"
                 ) {
 
                     input =
@@ -557,10 +601,8 @@ async function proxyRequest(target, req, res) {
                 );
 
             if (
-                current.pathname ===
-                    "/proxy" &&
-                currentTarget ===
-                    absolute.href
+                current.pathname === "/proxy" &&
+                currentTarget === absolute.href
             ) {
                 return;
             }
@@ -657,18 +699,11 @@ async function proxyRequest(target, req, res) {
                     );
 
                 if (
-                    absolute.hostname ===
-                        "scratch.mit.edu" &&
+                    absolute.hostname === "scratch.mit.edu" &&
                     (
-                        absolute.pathname.startsWith(
-                            "/projects/"
-                        ) ||
-                        absolute.pathname.startsWith(
-                            "/studios/"
-                        ) ||
-                        absolute.pathname.startsWith(
-                            "/users/"
-                        )
+                        absolute.pathname.startsWith("/projects/") ||
+                        absolute.pathname.startsWith("/studios/") ||
+                        absolute.pathname.startsWith("/users/")
                     )
                 ) {
 
@@ -823,21 +858,11 @@ function rewriteAttribute(
 
     if (
         trimmed.startsWith("#") ||
-        trimmed.startsWith(
-            "javascript:"
-        ) ||
-        trimmed.startsWith(
-            "mailto:"
-        ) ||
-        trimmed.startsWith(
-            "tel:"
-        ) ||
-        trimmed.startsWith(
-            "data:"
-        ) ||
-        trimmed.startsWith(
-            "blob:"
-        )
+        trimmed.startsWith("javascript:") ||
+        trimmed.startsWith("mailto:") ||
+        trimmed.startsWith("tel:") ||
+        trimmed.startsWith("data:") ||
+        trimmed.startsWith("blob:")
     ) {
         return;
     }
@@ -851,10 +876,8 @@ function rewriteAttribute(
             );
 
         if (
-            absolute.protocol !==
-                "http:" &&
-            absolute.protocol !==
-                "https:"
+            absolute.protocol !== "http:" &&
+            absolute.protocol !== "https:"
         ) {
             return;
         }
@@ -894,15 +917,9 @@ function rewriteCSSUrls(
 
             if (
                 !trimmed ||
-                trimmed.startsWith(
-                    "data:"
-                ) ||
-                trimmed.startsWith(
-                    "blob:"
-                ) ||
-                trimmed.startsWith(
-                    "#"
-                )
+                trimmed.startsWith("data:") ||
+                trimmed.startsWith("blob:") ||
+                trimmed.startsWith("#")
             ) {
                 return match;
             }
@@ -916,10 +933,8 @@ function rewriteCSSUrls(
                     );
 
                 if (
-                    absolute.protocol !==
-                        "http:" &&
-                    absolute.protocol !==
-                        "https:"
+                    absolute.protocol !== "http:" &&
+                    absolute.protocol !== "https:"
                 ) {
                     return match;
                 }
@@ -949,20 +964,15 @@ function isPrivateAddress(
     address
 ) {
 
-    if (
-        net.isIPv4(address)
-    ) {
+    if (net.isIPv4(address)) {
 
         const parts =
             address
                 .split(".")
                 .map(Number);
 
-        const a =
-            parts[0];
-
-        const b =
-            parts[1];
+        const a = parts[0];
+        const b = parts[1];
 
         if (a === 10) {
             return true;
@@ -997,16 +1007,12 @@ function isPrivateAddress(
         return false;
     }
 
-    if (
-        net.isIPv6(address)
-    ) {
+    if (net.isIPv6(address)) {
 
         const normalized =
             address.toLowerCase();
 
-        if (
-            normalized === "::1"
-        ) {
+        if (normalized === "::1") {
             return true;
         }
 
@@ -1036,22 +1042,10 @@ function isPrivateAddress(
 function escapeHtml(value) {
 
     return String(value)
-        .replace(
-            /&/g,
-            "&amp;"
-        )
-        .replace(
-            /"/g,
-            "&quot;"
-        )
-        .replace(
-            /</g,
-            "&lt;"
-        )
-        .replace(
-            />/g,
-            "&gt;"
-        );
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
 }
 
 // ==================================================
