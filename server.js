@@ -756,10 +756,14 @@ async function proxyRequest(target, req, res) {
 
     } catch (error) {
 
-        console.error(
-            "Hollowsoft proxy error:",
-            error
-        );
+console.error("Hollowsoft proxy request failed:", {
+    url: targetURL.href,
+    hostname: targetURL.hostname,
+    message: error.message,
+    code: error.cause?.code,
+    cause: error.cause?.message,
+    stack: error.stack
+});
 
         return res.status(
             502
